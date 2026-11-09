@@ -61,6 +61,26 @@ public struct EngineConfig: Sendable, Equatable {
     /// Refractory cooldown duration in seconds following a dwell click.
     public var hoverDwellCooldownSec: TimeInterval
     
+    // MARK: - Calibration & Handheld Ergonomics Parameters
+    
+    /// Maximum angular speed (rad/s) considered steady during auto-calibration (default: 0.06 rad/s).
+    public var quiescenceThresholdRadS: Double
+    
+    /// Enables gravity-anchored horizon leveling for handheld AirPods telemetry (default: false).
+    public var useGravityHorizonCalibration: Bool
+    
+    /// Requires a deliberate upward pitch tilt after stillness to lock screen-right axis (default: false).
+    public var requireUpTiltGestureCalibration: Bool
+    
+    /// Inverts horizontal cursor displacement direction if set to true.
+    public var invertX: Bool
+    
+    /// Inverts vertical cursor displacement direction if set to true.
+    public var invertY: Bool
+    
+    /// Enables hover-dwell left clicking (default: true).
+    public var enableHoverDwellClick: Bool
+    
     public init(
         sampleRateHz: Double = 100.0,
         oneEuroMinCutoff: Double = 0.8,
@@ -78,7 +98,13 @@ public struct EngineConfig: Sendable, Equatable {
         hoverDwellRadiusPx: Double = 4.0,
         hoverDwellDurationSec: TimeInterval = 0.450,
         hoverDwellMinTravelPx: Double = 25.0,
-        hoverDwellCooldownSec: TimeInterval = 0.500
+        hoverDwellCooldownSec: TimeInterval = 0.500,
+        quiescenceThresholdRadS: Double = 0.06,
+        useGravityHorizonCalibration: Bool = false,
+        requireUpTiltGestureCalibration: Bool = false,
+        invertX: Bool = false,
+        invertY: Bool = false,
+        enableHoverDwellClick: Bool = true
     ) {
         self.sampleRateHz = sampleRateHz
         self.oneEuroMinCutoff = oneEuroMinCutoff
@@ -97,5 +123,57 @@ public struct EngineConfig: Sendable, Equatable {
         self.hoverDwellDurationSec = hoverDwellDurationSec
         self.hoverDwellMinTravelPx = hoverDwellMinTravelPx
         self.hoverDwellCooldownSec = hoverDwellCooldownSec
+        self.quiescenceThresholdRadS = quiescenceThresholdRadS
+        self.useGravityHorizonCalibration = useGravityHorizonCalibration
+        self.requireUpTiltGestureCalibration = requireUpTiltGestureCalibration
+        self.invertX = invertX
+        self.invertY = invertY
+        self.enableHoverDwellClick = enableHoverDwellClick
+    }
+    
+    /// Ergonomic preset tuned for live single-AirPod handheld cursor control on macOS displays.
+    public static func liveHandheld(
+        sensitivity: Double = 1.0,
+        screenWidthPx: Double? = nil,
+        requireUpTiltGesture: Bool = true,
+        invertX: Bool = false,
+        invertY: Bool = false,
+        enableHoverDwellClick: Bool = true
+    ) -> EngineConfig {
+        let safeSensitivity = (sensitivity.isFinite && sensitivity > 0.0)
+            ? min(max(sensitivity, 0.1), 5.0)
+            : 1.0
+        let displayScale: Double = {
+            guard let width = screenWidthPx, width.isFinite, width > 400.0 else {
+                return 1.0
+            }
+            return min(max(width / 1512.0, 0.90), 1.80)
+        }()
+        let gainScale = safeSensitivity * displayScale
+        return EngineConfig(
+            sampleRateHz: 100.0,
+            oneEuroMinCutoff: 1.35,
+            oneEuroBeta: 0.75,
+            oneEuroDercutoff: 1.5,
+            ballisticsMinGain: 750.0 * gainScale,
+            ballisticsMaxGain: 4800.0 * gainScale,
+            ballisticsMidVelocity: 0.55,
+            ballisticsSlope: 3.2,
+            ballisticsDeadband: 0.020,
+            rollTwistThresholdRadS: 4.2,
+            rollTwistMaxPlanarRadS: 1.2,
+            rollTwistLockoutDuration: 0.18,
+            rollTwistDebounceDuration: 0.40,
+            hoverDwellRadiusPx: 4.5,
+            hoverDwellDurationSec: 0.550,
+            hoverDwellMinTravelPx: 25.0,
+            hoverDwellCooldownSec: 0.500,
+            quiescenceThresholdRadS: 0.14,
+            useGravityHorizonCalibration: true,
+            requireUpTiltGestureCalibration: requireUpTiltGesture,
+            invertX: invertX,
+            invertY: invertY,
+            enableHoverDwellClick: enableHoverDwellClick
+        )
     }
 }

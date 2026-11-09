@@ -18,16 +18,21 @@ public struct MotionFrame: Sendable, Equatable {
     /// User linear acceleration in gravitational units (g, ~9.81 m/s^2), excluding gravity.
     public let userAcceleration: simd_double3
     
+    /// Filtered gravity vector in device body coordinates when provided by CoreMotion (pointing Earth-down).
+    public let gravity: simd_double3?
+    
     public init(
         timestamp: TimeInterval,
         attitudeQuaternion: simd_quatd,
         rotationRate: simd_double3,
-        userAcceleration: simd_double3 = simd_double3(0, 0, 0)
+        userAcceleration: simd_double3 = simd_double3(0, 0, 0),
+        gravity: simd_double3? = nil
     ) {
         self.timestamp = timestamp
         self.attitudeQuaternion = attitudeQuaternion
         self.rotationRate = rotationRate
         self.userAcceleration = userAcceleration
+        self.gravity = gravity
     }
 }
 

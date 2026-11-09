@@ -1,73 +1,99 @@
-# AirPodWand (`AirpodsOrMouse`)
+# AirPodWand
 
-Turn AirPods (AirPods 4, AirPods Pro, AirPods 3, AirPods Max) into a handheld 6-DoF macOS cursor controller and gesture mouse using native Apple frameworks (`CoreMotion`, `CoreAudio`, `AVFoundation`, `MediaPlayer`, `CoreGraphics`) with **zero external dependencies**.
+**Pure-Software macOS 6-DoF AirPods Cursor Controller & Gesture Engine (Swift 6)**
 
----
-
-## Requirements
-
-- **Mac**: macOS 14+ (Sonoma or newer) with Bluetooth
-- **Toolchain**: Xcode 16+ or Apple Command Line Tools (`swift --version` 6.0+)
-- **Headphones**: Paired AirPods supporting CoreMotion Headphone Motion (`CMHeadphoneMotionManager`)
+AirPodWand transforms AirPods 4 (and compatible CoreMotion headphones) into a precision handheld 3D wand/mouse driver on macOS—implemented purely with native Apple SDK frameworks and **zero external SPM dependencies**.
 
 ---
 
-## Build & Verify (Pure-Software Self-Check)
+## Architecture
 
-Clone the repository and build from the repository root:
+```mermaid
+flowchart LR
+    HW["CoreMotion / VirtualMotionGenerator (100 Hz)"] -->|MotionFrame| Engine["MotionAndClickEngine Actor"]
+    Audio["SoftwareAudioWake (CoreAudio + AVAudioEngine + MPRemoteCommandCenter)"] -->|StemPinchType| Engine
+    Engine --> Calib["1. AutoCalibrator (300 ms q_ref & Tilt Decoupling)"]
+    Calib --> Filter["2. AdaptiveOneEuroFilter (6-12 Hz Tremor Suppression)"]
+    Filter --> Ball["3. SigmoidBallistics (400-2800 px/rad Gain)"]
+    Ball --> Clicks["4. GestureClickEngine (Roll-Twist + Hover-Dwell + Lock)"]
+    Clicks -->|CursorDelta + ClickType| Sink["CGEventCursorSink / SoftwareEventSpy"]
+```
+
+### Package Targets (`Package.swift`)
+- **`AirPodWandCore`** (`Sources/AirPodWandCore/`):
+  - `Domain/`: `MotionFrame`, `CursorDelta`, `ClickType`, `ClickEvent`, `EngineConfig`, `SimulationResult`, `RecordedClick`.
+  - `Protocols/`: `MotionSourceProtocol`, `AudioWakeProtocol`, `StemPinchHandling`, `CursorEventSink`.
+  - `Audio/SoftwareAudioWake.swift`: `AudioAutoRouter`, `MockAudioHardwareProvider`, `SystemAudioHardwareProvider`, `AudioBufferSynthesizer`, and `SoftwareAudioWake` (CoreAudio routing, fallback restoration, sub-audible 20 Hz `AVAudioSourceNode`, `MPNowPlayingInfoCenter`, `MPRemoteCommandCenter` stem hooks).
+  - `Motion/`: `AutoCalibrator`, `AdaptiveOneEuroFilter` (`OneEuroFilter`), `SigmoidBallistics`, `GestureClickEngine` (`RollTwistClickDetector`, `HoverDwellClickDetector`), `MotionAndClickEngine`, `HeadphoneMotionSource`.
+  - `Cursor/CGEventCursorSink.swift`: WindowServer cursor warping & quartz event dispatch with display clamping, click history ring buffer, and zero-wander lock suppression.
+  - `Simulation/VirtualSimulator.swift`: `VirtualMotionGenerator`, `SoftwareEventSpy`, `MockAudioWake`.
+- **`AirPodWandCLI`** (`Sources/AirPodWandCLI/`):
+  - `main.swift`: CLI parser (`--simulate-e2e`, `--live`, `--help`/`-h`).
+  - `SimulationRunner.swift`: Headless closed-loop verification runner (`--simulate-e2e`).
+  - `LivePipeline.swift`: Live orchestrator wiring `SoftwareAudioWake` (`StemPinchHandling`), `HeadphoneMotionSource`, `MotionAndClickEngine`, `CGEventCursorSink`, and `SignalTrap`.
+  - `SignalTrap.swift` & `Info.plist` (linked into Mach-O `__TEXT,__info_plist` for macOS Motion TCC).
+- **`AirPodWandTests`** (`Tests/AirPodWandTests/`): Comprehensive multi-tier verification, stress, concurrency, and adversarial test suites.
+
+---
+
+## Pure-Software Verification & Usage
+
+### Run All Tests (Debug + Strict Concurrency)
+```bash
+swift test -Xswiftc -warnings-as-errors
+```
+
+### Run ThreadSanitizer Concurrency Audit
+```bash
+swift test --sanitize=thread
+```
+
+### Run Headless Closed-Loop E2E Simulation
+```bash
+swift run AirPodWandCLI --simulate-e2e
+```
+Expected exit code `0` with `E2E_SOFTWARE_VERIFICATION_PASSED`, bounded trajectory RMSE `<= 3.5 px`, cross-axis coupling `< 2.0%`, `0.0000 px` locked wander, and `3` verified gesture clicks (`hover_dwell`, `roll_twist_cw`, `roll_twist_ccw`).
+
+### Build Release Binary & Verify Embedded Motion TCC Metadata
+```bash
+swift build -c release -Xswiftc -warnings-as-errors
+otool -P .build/release/AirPodWandCLI
+.build/release/AirPodWandCLI --help
+```
+
+### Live Hardware Mode (Single Right AirPod Supported)
+> Requires paired AirPods supporting `CMHeadphoneMotionManager` (AirPods 4 / AirPods Pro 2 / Max) on macOS, plus Motion & Accessibility permissions on first launch.
 
 ```bash
-git clone https://github.com/eternallytanuj-hub/AirpodsOrMouse.git
-cd AirpodsOrMouse
-swift build -c release
+.build/release/AirPodWandCLI --live
 ```
 
-Verify the full DSP and gesture pipeline without hardware first:
+#### How to Hold Only the Right AirPod
+1. Pinch the earbud body lightly between your thumb and index finger so **your skin touches the small black optical in-ear sensor** on the inner side (this keeps the AirPod H2 motion chip active out of the ear).
+2. Let the stem point **downward toward your desk** (angled ~20–30° forward toward the display), using small wrist rotations like a laser pointer.
+3. Follow the 2-step calibration printed in terminal (~0.5 s total):
+   - **Step 1 (`[Calibration 1/2]`)**: Hold steady for `0.25 s` so Earth gravity locks horizontal left/right without inversion.
+   - **Step 2 (`[Calibration 2/2]`)**: Gently tilt the top/earbud slightly **upward** toward the top edge of your screen once to lock your grip's Up/Down pitch axis.
 
+#### Live Tuning Flags & Controls
 ```bash
-.build/release/AirPodWandCLI --simulate-e2e
+.build/release/AirPodWandCLI --live --sensitivity 1.25 --no-dwell
 ```
-
-Expected output ends with `E2E_SOFTWARE_VERIFICATION_PASSED` (`exit 0`).
-
----
-
-## Running Live on Your Mac
-
-1. **Connect your AirPods** to your Mac via Bluetooth.
-2. **Start the driver** from the repo directory:
-   ```bash
-   .build/release/AirPodWandCLI --live
-   ```
-   *(Optional install for system-wide launching — `Info.plist` is embedded directly into the Mach-O binary):*
-   ```bash
-   sudo cp .build/release/AirPodWandCLI /usr/local/bin/airpodwand
-   airpodwand --live
-   ```
-3. **Grant macOS Permissions** when prompted (or in **System Settings → Privacy & Security**):
-   - **Motion & Fitness**: Allow access so `CMHeadphoneMotionManager` can read 100 Hz AirPods IMU telemetry.
-   - **Accessibility**: Allow your Terminal app (or `AirPodWandCLI`) so `CGEvent` mouse clicks register across macOS apps.
-4. **Hold / Wear Your AirPods**: Keep the earbud active (worn or held against the skin/in-ear sensor so macOS keeps AirPods IMU streaming). AirPodWand automatically sets AirPods as the default CoreAudio output, streams a sub-audible 20 Hz keep-alive tone, and restores your previous audio output when you quit.
+- `--sensitivity <0.1..5.0>`: Adjust cursor speed multiplier (display width auto-scales automatically; default `1.0`)
+- `--quick-calibrate`: Skip Step 2 upward tilt and lock right after `0.25 s` stillness
+- `--invert-x` / `--invert-y`: Flip horizontal or vertical cursor direction manually
+- `--no-dwell`: Disable hover-dwell auto-clicking while keeping stem & roll-twist clicks active
+- **Single Stem Pinch** (`togglePlayPauseCommand`): Left click (`stem_single_pinch`)
+- **Double Stem Pinch** (`nextTrackCommand`): Right click (`stem_double_pinch`)
+- **Triple Stem Pinch** (`previousTrackCommand`): Trigger fresh 2-step recalibration if you change grip
+- **Axial Roll Twist**: Clockwise (`> +4.2 rad/s`) = left click; Counter-Clockwise (`< -4.2 rad/s`) = right click
+- **Hover-Dwell**: Approach `>= 25 px`, hold steady inside `4.5 px` radius for `550 ms` = left click (disabled with `--no-dwell`)
 
 ---
 
-## Controls & Gestures
-
-| Action | Gesture / Trigger | Notes |
-|---|---|---|
-| **Auto-Calibrate Zero Grip** | Hold still for ~300 ms | Automatically aligns cursor axes to your grip angle |
-| **Move Cursor** | Tilt / pan wrist or head smoothly | Filtered via adaptive 1€ filter + sigmoid velocity curve |
-| **Left Click** | Quick **clockwise** axial roll twist, **Hover-Dwell** (move ≥ 25 px, hold steady 450 ms within 4 px), or **Single Stem Pinch** (`togglePlayPause`) | Cursor locks for 180 ms during roll-twist clicks to avoid click drift |
-| **Right Click** | Quick **counter-clockwise** axial roll twist or **Double Stem Pinch** (`nextTrack`) | Uses 400 ms cooldown between twists |
-| **Recalibrate Grip** | Rest stationary ≥ 3 seconds then hold still 300 ms, or **Triple Stem Pinch** (`previousTrack`) | Re-zeros grip reference orientation |
-| **Quit Cleanly** | Press `Ctrl+C` (`SIGINT`) or send `SIGTERM` | Halts motion updates and restores prior audio output device |
-
----
-
-## CLI Options
-
-```text
-AirPodWandCLI --simulate-e2e   Run synthetic closed-loop verification (default)
-AirPodWandCLI --live           Run live AirPods CoreMotion cursor controller
-AirPodWandCLI --help           Show CLI help
-```
+## Workflows
+Multi-agent verification and execution workflows live under [`.agents/workflows/`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/):
+- [`build-and-verify.md`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/build-and-verify.md)
+- [`simulate-e2e.md`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/simulate-e2e.md)
+- [`tsan-audit.md`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/tsan-audit.md)
+- [`live-driver.md`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/live-driver.md)

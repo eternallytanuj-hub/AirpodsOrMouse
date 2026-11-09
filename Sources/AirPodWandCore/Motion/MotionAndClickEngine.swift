@@ -69,7 +69,35 @@ public actor MotionAndClickEngine {
         }
         
         // Stage 1: Auto-Calibration & Grip Tilt Decoupling
+        let wasCalibrated = autoCalibrator.isCalibrated
+        let wasSettling = autoCalibrator.isInPostCalibrationSettle
         let rawDecoupled = autoCalibrator.process(frame: frame)
+        let isNowCalibrated = autoCalibrator.isCalibrated
+        let isNowSettling = autoCalibrator.isInPostCalibrationSettle
+        
+        if config.useGravityHorizonCalibration {
+            let calibrationTransitionedReady = (!wasCalibrated && isNowCalibrated && !isNowSettling) || (wasSettling && !isNowSettling)
+            if calibrationTransitionedReady {
+                filter.reset()
+                gestureEngine.reset()
+            }
+            if !isNowCalibrated || wasSettling || isNowSettling {
+                var earlyClicks: [ClickType] = []
+                if !pendingStemClicks.isEmpty {
+                    earlyClicks.append(contentsOf: pendingStemClicks)
+                    pendingStemClicks.removeAll(keepingCapacity: true)
+                }
+                let zeroDelta = CursorDelta(dx: 0.0, dy: 0.0, isLocked: false, timestamp: validTimestamp)
+                if let sink = sink {
+                    await sink.postMove(delta: zeroDelta)
+                    for click in earlyClicks {
+                        await sink.postClick(type: click)
+                    }
+                }
+                return (zeroDelta, earlyClicks)
+            }
+        }
+        
         let decoupledRates = (rawDecoupled.x.isFinite && rawDecoupled.y.isFinite && rawDecoupled.z.isFinite)
             ? rawDecoupled
             : .zero
@@ -82,15 +110,26 @@ public actor MotionAndClickEngine {
         )
         
         // Stage 3: Sigmoid Velocity Ballistics & Screen Projection
-        let rawDelta = ballistics.calculateDelta(
+        var rawDelta = ballistics.calculateDelta(
             pitchRate: filteredPitch,
             yawRate: filteredYaw,
             dt: dt,
             timestamp: validTimestamp
         )
         
+        if config.invertX || config.invertY {
+            let flippedDx = (config.invertX && rawDelta.dx != 0.0) ? -rawDelta.dx : rawDelta.dx
+            let flippedDy = (config.invertY && rawDelta.dy != 0.0) ? -rawDelta.dy : rawDelta.dy
+            rawDelta = CursorDelta(
+                dx: flippedDx,
+                dy: flippedDy,
+                isLocked: rawDelta.isLocked,
+                timestamp: rawDelta.timestamp
+            )
+        }
+        
         // Stage 4: Gesture Click Engine & Cursor Delta Locking
-        var (finalDelta, clicks) = gestureEngine.process(
+        let (finalDelta, initialClicks) = gestureEngine.process(
             pitchRate: decoupledRates.x,
             yawRate: decoupledRates.y,
             rollRate: decoupledRates.z,
@@ -98,6 +137,7 @@ public actor MotionAndClickEngine {
             timestamp: validTimestamp,
             dt: dt
         )
+        var clicks = initialClicks
         
         // Stage 5: Drain any pending stem media pinch clicks
         if !pendingStemClicks.isEmpty {
@@ -144,14 +184,41 @@ public actor MotionAndClickEngine {
         autoCalibrator.forceCalibrate(quat)
     }
     
+    /// Forces immediate calibration using explicit screen basis vectors (right, forward, up) in body coordinates.
+    public func forceCalibrateBasis(right: simd_double3, forward: simd_double3, up: simd_double3) {
+        autoCalibrator.forceCalibrateBasis(right: right, forward: forward, up: up)
+        filter.reset()
+        gestureEngine.reset()
+    }
+    
     /// Recalibrates reference orientation. If quaternion is nil, requests automatic recalibration upon next settle.
     public func recalibrate(quaternion: simd_quatd? = nil) {
         autoCalibrator.recalibrate(quaternion: quaternion)
+        if quaternion == nil && config.useGravityHorizonCalibration {
+            filter.reset()
+            gestureEngine.reset()
+        }
     }
     
     /// State queries
     public var isCalibrated: Bool {
         autoCalibrator.isCalibrated
+    }
+    
+    public var calibrationPhase: CalibrationPhase {
+        autoCalibrator.calibrationPhase
+    }
+    
+    public var screenRightAxis: simd_double3 {
+        autoCalibrator.screenRightAxis
+    }
+    
+    public var screenUpAxis: simd_double3 {
+        autoCalibrator.screenUpAxis
+    }
+    
+    public var screenForwardAxis: simd_double3 {
+        autoCalibrator.screenForwardAxis
     }
     
     public var referenceQuaternion: simd_quatd {

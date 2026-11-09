@@ -279,10 +279,12 @@ public struct GestureClickEngine: Sendable, Equatable {
     
     public var rollTwistDetector: RollTwistClickDetector
     public var hoverDwellDetector: HoverDwellClickDetector
+    public let enableHoverDwell: Bool
     
     public init(config: EngineConfig = EngineConfig()) {
         self.rollTwistDetector = RollTwistClickDetector(config: config)
         self.hoverDwellDetector = HoverDwellClickDetector(config: config)
+        self.enableHoverDwell = config.enableHoverDwellClick
     }
     
     /// Processes decoupled motion rates and raw ballistics deltas, managing cursor delta locking and click emissions.
@@ -317,7 +319,7 @@ public struct GestureClickEngine: Sendable, Equatable {
         if let tc = twistClick {
             clicksToEmit.append(tc)
             hoverDwellDetector.abort()
-        } else {
+        } else if enableHoverDwell {
             // Also abort dwell if roll twist onset lock is active
             if abs(rollRate) >= rollTwistDetector.onsetLockThresholdRadS {
                 hoverDwellDetector.abort()

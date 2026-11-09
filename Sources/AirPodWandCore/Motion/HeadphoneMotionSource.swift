@@ -148,12 +148,17 @@ public actor HeadphoneMotionSource: MotionSourceProtocol {
         let q = motion.attitude.quaternion
         let rot = motion.rotationRate
         let acc = motion.userAcceleration
+        let grav = motion.gravity
+        let gravityVec: simd_double3? = (grav.x.isFinite && grav.y.isFinite && grav.z.isFinite)
+            ? simd_double3(x: grav.x, y: grav.y, z: grav.z)
+            : nil
 
         return MotionFrame(
             timestamp: motion.timestamp,
             attitudeQuaternion: simd_quatd(ix: q.x, iy: q.y, iz: q.z, r: q.w),
             rotationRate: simd_double3(x: rot.x, y: rot.y, z: rot.z),
-            userAcceleration: simd_double3(x: acc.x, y: acc.y, z: acc.z)
+            userAcceleration: simd_double3(x: acc.x, y: acc.y, z: acc.z),
+            gravity: gravityVec
         )
     }
 

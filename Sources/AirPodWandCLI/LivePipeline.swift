@@ -18,7 +18,8 @@ public struct LivePipeline: Sendable {
         audioWake: any AudioWakeProtocol = SoftwareAudioWake(),
         motionSource: any MotionSourceProtocol = HeadphoneMotionSource(),
         cursorSink: any CursorEventSink = CGEventCursorSink(),
-        enableSignalTrap: Bool = true
+        enableSignalTrap: Bool = true,
+        engineConfig: EngineConfig = EngineConfig()
     ) async throws {
         print("=======================================================")
         print("Starting AirPodWand Live macOS Cursor Daemon")
@@ -34,11 +35,21 @@ public struct LivePipeline: Sendable {
         }
 
         // 2. Initialize DSP motion and gesture click engine & bind stem media pinch hooks
-        let engine = MotionAndClickEngine()
+        let engine = MotionAndClickEngine(config: engineConfig)
         let stemQueue = StemEventQueue()
         let stemSource = audioWake as? any StemPinchHandling
         stemSource?.setStemPinchHandler { pinchType in
             stemQueue.enqueue(pinchType)
+        }
+
+        if engineConfig.useGravityHorizonCalibration {
+            print("""
+            [AirPodWand] Grip Guide (Single Right AirPod):
+              • Hold the earbud lightly between thumb and index finger, with a finger
+                touching the black optical in-ear sensor on the inner side (keeps H2 active).
+              • Keep the stem pointing downward toward the desk and slightly forward.
+              • Triple-pinch the stem at any time to recalibrate if you change your grip.
+            """)
         }
 
         // 3. Start CoreAudio keep-alive tone and stem media hooks
@@ -73,8 +84,18 @@ public struct LivePipeline: Sendable {
         let stream: AsyncStream<MotionFrame>
         do {
             stream = try await motionSource.start()
-            print("[AirPodWand] Motion stream active at 100 Hz. System cursor active.")
+            print("[AirPodWand] Motion stream active at 100 Hz.")
+            if engineConfig.useGravityHorizonCalibration {
+                if engineConfig.requireUpTiltGestureCalibration {
+                    print("[Calibration 1/2] Hold your Right AirPod steady for 0.3s to lock Earth horizon...")
+                } else {
+                    print("[Calibration] Quick-calibrate: Hold your Right AirPod steady for 0.3s...")
+                }
+            } else {
+                print("[AirPodWand] System cursor active.")
+            }
             print("[AirPodWand] Press Ctrl+C to terminate daemon.\n")
+            fflush(stdout)
         } catch {
             print("[AirPodWand] Motion stream initialization failed: \(error)")
             stemSource?.setStemPinchHandler(nil)
@@ -90,6 +111,9 @@ public struct LivePipeline: Sendable {
         }
 
         // 6. Main processing loop: drain stem pinches in causal order before each frame
+        var lastReportedPhase: CalibrationPhase = .awaitingStillness
+        var announcedReady = !engineConfig.useGravityHorizonCalibration
+
         for await frame in stream {
             if shutdownState.isShuttingDown { break }
             for pinch in stemQueue.drain() {
@@ -100,9 +124,32 @@ public struct LivePipeline: Sendable {
                     await engine.injectStemClick(type: .rightClick(source: StemPinchType.doublePinch.rawValue))
                 case .triplePinch:
                     await engine.recalibrate(quaternion: nil)
+                    if engineConfig.useGravityHorizonCalibration {
+                        lastReportedPhase = .awaitingStillness
+                        announcedReady = false
+                        print("\n[Calibration 1/2] Recalibration requested — hold AirPod steady for 0.3s...")
+                        fflush(stdout)
+                    }
                 }
             }
             await engine.process(frame: frame, sink: cursorSink)
+            if !announcedReady {
+                let phase = await engine.calibrationPhase
+                if phase != lastReportedPhase {
+                    lastReportedPhase = phase
+                    switch phase {
+                    case .awaitingStillness:
+                        break
+                    case .awaitingUpTilt:
+                        print("[Calibration 2/2] Tilt the Right AirPod slightly UPWARD toward the top of your screen to lock Up/Down axis...")
+                        fflush(stdout)
+                    case .calibrated:
+                        announcedReady = true
+                        print("[Calibration Complete] Screen axes locked — move cursor smoothly with wrist rotation!\n")
+                        fflush(stdout)
+                    }
+                }
+            }
         }
 
         // 7. Cleanup upon stream completion or signal cancellation & flush remaining stem clicks
