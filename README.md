@@ -36,30 +36,6 @@ flowchart LR
 
 ---
 
-## Pure-Software Verification & Usage
-
-### Run All Tests (Debug + Strict Concurrency)
-```bash
-swift test -Xswiftc -warnings-as-errors
-```
-
-### Run ThreadSanitizer Concurrency Audit
-```bash
-swift test --sanitize=thread
-```
-
-### Run Headless Closed-Loop E2E Simulation
-```bash
-swift run AirPodWandCLI --simulate-e2e
-```
-Expected exit code `0` with `E2E_SOFTWARE_VERIFICATION_PASSED`, bounded trajectory RMSE `<= 3.5 px`, cross-axis coupling `< 2.0%`, `0.0000 px` locked wander, and `3` verified gesture clicks (`hover_dwell`, `roll_twist_cw`, `roll_twist_ccw`).
-
-### Build Release Binary & Verify Embedded Motion TCC Metadata
-```bash
-swift build -c release -Xswiftc -warnings-as-errors
-otool -P .build/release/AirPodWandCLI
-.build/release/AirPodWandCLI --help
-```
 
 ### Live Hardware Mode (Single Right AirPod Supported)
 > Requires paired AirPods supporting `CMHeadphoneMotionManager` (AirPods 4 / AirPods Pro 2 / Max) on macOS, plus Motion & Accessibility permissions on first launch.
@@ -91,9 +67,3 @@ otool -P .build/release/AirPodWandCLI
 
 ---
 
-## Workflows
-Multi-agent verification and execution workflows live under [`.agents/workflows/`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/):
-- [`build-and-verify.md`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/build-and-verify.md)
-- [`simulate-e2e.md`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/simulate-e2e.md)
-- [`tsan-audit.md`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/tsan-audit.md)
-- [`live-driver.md`](file:///Volumes/SeaGate/airpods_or_mouse?/.agents/workflows/live-driver.md)
