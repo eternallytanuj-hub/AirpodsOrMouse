@@ -1,8 +1,8 @@
-# AirPodWand
+# AirPodsOrMouse
 
 **Pure-Software macOS 6-DoF AirPods Cursor Controller & Gesture Engine (Swift 6)**
 
-AirPodWand transforms AirPods 4 (and compatible CoreMotion headphones) into a precision handheld 3D wand/mouse driver on macOS—implemented purely with native Apple SDK frameworks and **zero external SPM dependencies**.
+AirPodsOrMouse transforms AirPods 4 (and compatible CoreMotion headphones) into a precision handheld 3D wand/mouse driver on macOS—implemented purely with native Apple SDK frameworks and **zero external SPM dependencies**.
 
 ---
 
